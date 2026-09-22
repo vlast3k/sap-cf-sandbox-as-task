@@ -1,0 +1,18 @@
+---
+applications:
+- name: sandbox-orchestrator
+  memory: 256M
+  disk_quota: 1G
+  instances: 1
+  buildpacks:
+  - python_buildpack
+  command: python -m uvicorn app:app --host 0.0.0.0 --port $PORT
+  routes:
+  - route: sandbox-orchestrator.cfapps.example.com   # replace with your CF domain
+  env:
+    CF_API_URL: https://api.cf.example.com            # replace with your CF API URL
+    CF_ADMIN_USER: ((cf-admin-user))                   # use a SpaceDeveloper account
+    CF_ADMIN_PASS: ((cf-admin-pass))                   # inject via cf set-env or a UPS
+    CF_SKIP_SSL: "false"
+    SANDBOX_APP_GUID: ((sandbox-app-guid))             # GUID of the sandbox template app
+    APP_URL: wss://sandbox-orchestrator.cfapps.example.com

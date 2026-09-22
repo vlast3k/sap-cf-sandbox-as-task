@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sandbox Orchestrator — Admin</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'JetBrains Mono', 'SF Mono', monospace; background: #0a0e1a; color: #c9d1d9; min-height: 100vh; }
+.header { background: #161b22; border-bottom: 1px solid #30363d; padding: 1rem 1.5rem; display: flex; align-items: center; gap: 1rem; }
+.header h1 { font-size: 1.1rem; color: #58a6ff; }
+.header .status { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.container { display: grid; grid-template-columns: 320px 1fr; gap: 0; min-height: calc(100vh - 56px); }
+.sidebar { background: #0d1117; border-right: 1px solid #30363d; overflow-y: auto; }
+.main { overflow-y: auto; padding: 1rem; }
+
+/* Sidebar: sandboxes list */
+.section-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #8b949e; padding: 0.75rem 1rem 0.4rem; }
+.sandbox-card { padding: 0.75rem 1rem; border-bottom: 1px solid #21262d; cursor: pointer; transition: background 0.15s; }
+.sandbox-card:hover, .sandbox-card.active { background: #161b22; }
+.sandbox-name { font-size: 0.85rem; font-weight: 600; color: #c9d1d9; display: flex; align-items: center; gap: 0.5rem; }
+.sandbox-name .badge { font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 3px; font-weight: 400; }
+.badge-running { background: #0d4429; color: #3fb950; }
+.badge-starting { background: #3d2c00; color: #d29922; }
+.badge-stopped { background: #3d1c1c; color: #f85149; }
+.sandbox-meta { font-size: 0.7rem; color: #8b949e; margin-top: 0.25rem; }
+
+/* Main: command log */
+.cmd-entry { background: #161b22; border: 1px solid #21262d; border-radius: 6px; margin-bottom: 0.5rem; overflow: hidden; animation: slideIn 0.2s ease; }
+@keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+.cmd-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background: #0d1117; border-bottom: 1px solid #21262d; }
+.cmd-op { font-size: 0.75rem; font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 3px; }
+.op-bash { background: #1f3a5f; color: #79c0ff; }
+.op-write { background: #2d1f5f; color: #bc8cff; }
+.op-read { background: #1f5f3a; color: #7ce38b; }
+.op-glob { background: #5f4e1f; color: #e3d07c; }
+.op-grep { background: #5f1f3a; color: #ff7eb6; }
+.cmd-user { font-size: 0.7rem; color: #58a6ff; }
+.cmd-time { font-size: 0.65rem; color: #8b949e; margin-left: auto; }
+.cmd-body { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+.cmd-body pre { white-space: pre-wrap; word-break: break-all; }
+.cmd-body .cmd-input { color: #79c0ff; }
+.cmd-body .cmd-stdout { color: #7ce38b; }
+.cmd-body .cmd-stderr { color: #f85149; }
+.cmd-body .cmd-exitcode { color: #8b949e; font-style: italic; }
+
+/* Stats bar */
+.stats { display: flex; gap: 1.5rem; padding: 0.75rem 1rem; background: #161b22; border-bottom: 1px solid #30363d; }
+.stat { text-align: center; }
+.stat-value { font-size: 1.5rem; font-weight: 700; color: #58a6ff; }
+.stat-label { font-size: 0.65rem; color: #8b949e; text-transform: uppercase; }
+
+.empty-state { text-align: center; padding: 3rem; color: #8b949e; }
+.empty-state .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+
+/* Filter */
+.filter-bar { padding: 0.5rem 1rem; border-bottom: 1px solid #21262d; }
+.filter-bar select { background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-family: inherit; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🎛️ Sandbox Orchestrator</h1>
+  <div class="status"><div class="dot"></div><span id="conn-status">Connected</span></div>
+</div>
+<div class="stats">
+  <div class="stat"><div class="stat-value" id="stat-active">0</div><div class="stat-label">Active Sandboxes</div></div>
+  <div class="stat"><div class="stat-value" id="stat-total-cmds">0</div><div class="stat-label">Commands Executed</div></div>
+  <div class="stat"><div class="stat-value" id="stat-users">0</div><div class="stat-label">Users</div></div>
+</div>
+<div class="container">
+  <div class="sidebar">
+    <div class="section-title">Sandboxes</div>
+    <div id="sandbox-list">
+      <div class="empty-state"><div class="icon">📦</div>No active sandboxes</div>
+    </div>
+  </div>
+  <div class="main">
+    <div class="filter-bar">
+      <select id="filter-user"><option value="">All users</option></select>
+      <select id="filter-op"><option value="">All operations</option><option value="bash">bash</option><option value="write">write</option><option value="read">read</option><option value="glob">glob</option><option value="grep">grep</option></select>
+    </div>
+    <div id="cmd-log">
+      <div class="empty-state"><div class="icon">⏳</div>Waiting for commands...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';  // same origin
+let sessions = {};
+let cmdLog = [];
+let selectedUser = '';
+let totalCmds = 0;
+let lastSessionsHash = '';
+let lastCmdLogHash = '';
+
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function hashObj(o) { return JSON.stringify(o); }
+function timeAgo(ts) {
+  const s = Math.floor((Date.now()/1000) - ts);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s/60)}m ago`;
+  return `${Math.floor(s/3600)}h ago`;
+}
+
+function renderSidebar() {
+  const list = document.getElementById('sandbox-list');
+  const entries = Object.entries(sessions);
+  if (!entries.length) {
+    list.innerHTML = '<div class="empty-state"><div class="icon">📦</div>No active sandboxes</div>';
+    return;
+  }
+  // Sort by created_at descending (most recently started on top)
+  entries.sort((a, b) => b[1].created_at - a[1].created_at);
+  list.innerHTML = entries.map(([user, s]) => {
+    const badgeClass = s.task_state === 'running' ? 'badge-running' : s.task_state === 'starting' ? 'badge-starting' : 'badge-stopped';
+    // Use server-side cmd_count (accurate), fallback to client-side filter
+    const cmds = s.cmd_count ?? cmdLog.filter(c => c.user === user).length;
+    const taskId = s.task_id ? `#${s.task_id}` : '';
+    const startupInfo = s.startup_ms ? ` • ${(s.startup_ms / 1000).toFixed(1)}s cold start` : '';
+    return `<div class="sandbox-card${selectedUser === user ? ' active' : ''}" onclick="selectUser('${escHtml(user)}')">
+      <div class="sandbox-name">${escHtml(user)} <span class="badge ${badgeClass}">${s.task_state}</span></div>
+      <div class="sandbox-meta">${cmds} commands • started ${timeAgo(s.created_at)}${startupInfo}</div>
+      <div class="sandbox-meta" style="color:#6e7681">${taskId}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderCmdLog() {
+  const log = document.getElementById('cmd-log');
+  const filterUser = document.getElementById('filter-user').value;
+  const filterOp = document.getElementById('filter-op').value;
+  
+  let filtered = cmdLog;
+  if (filterUser) filtered = filtered.filter(c => c.user === filterUser);
+  if (filterOp) filtered = filtered.filter(c => c.op === filterOp);
+  
+  if (!filtered.length) {
+    log.innerHTML = '<div class="empty-state"><div class="icon">⏳</div>Waiting for commands...</div>';
+    return;
+  }
+  
+  log.innerHTML = filtered.slice(-50).reverse().map(c => {
+    const opClass = `op-${c.op}`;
+    let bodyHtml = '';
+    if (c.op === 'bash') {
+      bodyHtml = `<pre><span class="cmd-input">$ ${escHtml(c.params?.command || '')}</span></pre>`;
+      if (c.result) {
+        if (c.result.stdout) bodyHtml += `<pre class="cmd-stdout">${escHtml(c.result.stdout.slice(0, 2000))}</pre>`;
+        if (c.result.stderr) bodyHtml += `<pre class="cmd-stderr">${escHtml(c.result.stderr.slice(0, 1000))}</pre>`;
+        if (c.result.exit_code && c.result.exit_code !== 0) bodyHtml += `<span class="cmd-exitcode">exit ${c.result.exit_code}</span>`;
+      }
+    } else if (c.op === 'write') {
+      const content = c.params?.content || '';
+      bodyHtml = `<pre><span class="cmd-input">→ ${escHtml(c.params?.path || '?')}</span>\n${escHtml(content.slice(0, 300))}${content.length > 300 ? '…' : ''}</pre>`;
+      if (c.result?.bytes_written) bodyHtml += `<span class="cmd-exitcode">✓ ${c.result.bytes_written} bytes</span>`;
+    } else if (c.op === 'read') {
+      bodyHtml = `<pre><span class="cmd-input">← ${escHtml(c.params?.path || '?')}</span></pre>`;
+      if (c.result?.content) bodyHtml += `<pre class="cmd-stdout">${escHtml(c.result.content.slice(0, 300))}</pre>`;
+    } else if (c.op === 'glob') {
+      bodyHtml = `<pre><span class="cmd-input">🔍 ${escHtml(c.params?.pattern || '?')}</span></pre>`;
+      if (c.result?.files) bodyHtml += `<pre class="cmd-stdout">${escHtml(JSON.stringify(c.result.files))}</pre>`;
+    } else if (c.op === 'grep') {
+      bodyHtml = `<pre><span class="cmd-input">grep ${escHtml(c.params?.pattern || '')} ${escHtml(c.params?.path || '')}</span></pre>`;
+      if (c.result?.matches) bodyHtml += `<pre class="cmd-stdout">${escHtml(c.result.matches.slice(0, 300))}</pre>`;
+    }
+    return `<div class="cmd-entry">
+      <div class="cmd-header">
+        <span class="cmd-op ${opClass}">${c.op}</span>
+        <span class="cmd-user">${escHtml(c.user)}</span>
+        <span class="cmd-time">${c.time || ''}</span>
+      </div>
+      <div class="cmd-body">${bodyHtml}</div>
+    </div>`;
+  }).join('');
+}
+
+function selectUser(user) {
+  selectedUser = user === selectedUser ? '' : user;
+  document.getElementById('filter-user').value = selectedUser;
+  renderSidebar();
+  pollActivity();  // Re-fetch with new user filter
+}
+
+function updateStats() {
+  const active = Object.values(sessions).filter(s => s.task_state === 'running').length;
+  // Use server-side cmd_count sum for accurate total
+  const globalCmds = Object.values(sessions).reduce((sum, s) => sum + (s.cmd_count || 0), 0);
+  document.getElementById('stat-active').textContent = active;
+  document.getElementById('stat-total-cmds').textContent = globalCmds || totalCmds;
+  document.getElementById('stat-users').textContent = Object.keys(sessions).length;
+}
+
+async function pollSessions() {
+  try {
+    const resp = await fetch(`${API}/sessions`);
+    const data = await resp.json();
+    const newSessions = data.sessions || {};
+    const newHash = hashObj(newSessions);
+    if (newHash === lastSessionsHash) return;  // no change, skip re-render
+    lastSessionsHash = newHash;
+    sessions = newSessions;
+
+    // Update user filter dropdown
+    const select = document.getElementById('filter-user');
+    const current = select.value;
+    const opts = ['<option value="">All users</option>'];
+    for (const user of Object.keys(sessions)) {
+      opts.push(`<option value="${escHtml(user)}"${user === current ? ' selected' : ''}>${escHtml(user)}</option>`);
+    }
+    select.innerHTML = opts.join('');
+
+    renderSidebar();
+    updateStats();
+  } catch (e) {
+    document.getElementById('conn-status').textContent = 'Disconnected';
+  }
+}
+
+async function pollActivity() {
+  try {
+    const filterUser = document.getElementById('filter-user').value;
+    const url = filterUser ? `${API}/activity?user=${encodeURIComponent(filterUser)}` : `${API}/activity`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.commands) {
+      const newHash = hashObj(data.commands);
+      if (newHash === lastCmdLogHash) return;  // no change, skip re-render
+      lastCmdLogHash = newHash;
+      cmdLog = data.commands;
+      totalCmds = data.commands.length;
+      renderCmdLog();
+      updateStats();
+    }
+  } catch (e) {}
+}
+
+// Poll every 2 seconds
+setInterval(pollSessions, 2000);
+setInterval(pollActivity, 1500);
+pollSessions();
+pollActivity();
+
+// Filter handlers
+document.getElementById('filter-user').addEventListener('change', renderCmdLog);
+document.getElementById('filter-op').addEventListener('change', renderCmdLog);
+</script>
+</body>
+</html>

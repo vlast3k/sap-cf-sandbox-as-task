@@ -1,0 +1,9 @@
+---
+applications:
+- name: sandbox-template
+  docker:
+    image: your-registry.example.com/sandbox-worker:latest  # replace with your image
+  instances: 0        # never runs as a web process — only CF Tasks
+  memory: 256M
+  disk_quota: 512M
+  no-route: true      # no HTTP route needed
